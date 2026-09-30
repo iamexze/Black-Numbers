@@ -13,7 +13,10 @@ import json
 import re
 import sys
 import tempfile
+import threading
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -52,16 +55,24 @@ def t(name, fn):
 
 
 class FakeLog:
+    """Mirrors core.log.Log's full interface, including `event`'s positional-only
+    first parameter. A stub narrower than the thing it replaces just moves the
+    failure into the test suite."""
+
     def __init__(self):
         self.events = []
-        self.path = Path(tempfile.gettempdir()) / "bn-test.jsonl"
+        self.lines: list[tuple[str, str]] = []
+        self.path = Path(tempfile.mkdtemp()) / "bn-test.jsonl"
 
     def event(self, kind, /, **f):
         self.events.append({"kind": kind, **f})
 
-    def system(self, m): ...
-    def warn(self, m): ...
-    def ok(self, m): ...
+    def system(self, m): self.lines.append(("system", m))
+    def you(self, m): self.lines.append(("you", m))
+    def bn(self, m): self.lines.append(("bn", m))
+    def warn(self, m): self.lines.append(("warn", m))
+    def ok(self, m): self.lines.append(("ok", m))
+    def close(self): ...
 
 
 def _ctx(gate, reg=None, scheduler=None):
@@ -711,6 +722,193 @@ def test_config_creates_its_directories_and_reports_them():
         assert d.is_dir(), f"{d} was not created"
     keys = {k for k, _ in cfg.describe()}
     assert {"brain", "confirm policy", "home city"} <= keys
+
+
+# ── The local web console ───────────────────────────────────────────────────
+def _web_server():
+    """A real server on an ephemeral port, with every writable path temporary."""
+    from black_number.ui import runtime, web
+
+    cfg = config.load()
+    for field in ("notes_dir", "state_dir", "memory_dir", "log_dir"):
+        object.__setattr__(cfg, field, Path(tempfile.mkdtemp()))
+    object.__setattr__(cfg, "tts", "none")      # a test must never speak
+    object.__setattr__(cfg, "brain", "offline")
+
+    hub = web.Hub(confirm_timeout=2.0)
+    rt = runtime.build(cfg, hub.ask, log=web.HubLog(FakeLog(), hub), want_stt=False)
+    httpd = web.Console((web.HOST, 0), web.Handler, rt=rt, hub=hub, token="test-token")
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    return httpd, hub, rt, f"http://{web.HOST}:{httpd.server_address[1]}"
+
+
+def _http(url, path, *, token="test-token", payload=None, origin=None, timeout=20):
+    headers = {"Content-Type": "application/json"}
+    if token is not None:
+        headers["X-BN-Token"] = token
+    if origin:
+        headers["Origin"] = origin
+    req = urllib.request.Request(
+        url + path,
+        data=json.dumps(payload).encode() if payload is not None else None,
+        headers=headers,
+        method="POST" if payload is not None else "GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, json.loads(r.read() or b"{}"), dict(r.headers)
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}"), dict(e.headers)
+
+
+def test_web_console_binds_loopback_only():
+    """This API can control the machine. It must never be reachable from the
+    network, and that is not a setting."""
+    from black_number.ui import web
+    assert web.HOST == "127.0.0.1", f"the console must bind loopback, not {web.HOST}"
+    assert web.DEFAULT_PORT == 3002
+
+
+def test_web_console_rejects_requests_without_the_token():
+    httpd, hub, rt, url = _web_server()
+    try:
+        assert _http(url, "/api/state", token=None)[0] == 403
+        assert _http(url, "/api/state", token="wrong")[0] == 403
+        # The dangerous one: running a skill must not be reachable unauthenticated.
+        assert _http(url, "/api/ask", token=None, payload={"text": "lock the screen"})[0] == 403
+        assert _http(url, "/api/state")[0] == 200
+    finally:
+        httpd.shutdown(); httpd.server_close(); rt.shutdown(drain=False)
+
+
+def test_web_console_rejects_a_foreign_origin_and_sends_no_cors():
+    """A page on another origin must not be able to drive this, even if the token
+    leaked. And no CORS header may ever be sent, or a browser would let it read
+    the responses."""
+    httpd, hub, rt, url = _web_server()
+    try:
+        assert _http(url, "/api/state", origin="https://evil.example")[0] == 403
+        code, _, headers = _http(url, "/api/state", origin=f"{url}")
+        assert code == 200
+        assert not [h for h in headers if h.lower().startswith("access-control")], headers
+    finally:
+        httpd.shutdown(); httpd.server_close(); rt.shutdown(drain=False)
+
+
+def test_web_console_confirmation_round_trip():
+    """A gated skill must block the HTTP turn until the browser answers, run
+    nothing when refused, and run when approved."""
+    httpd, hub, rt, url = _web_server()
+    try:
+        for approved, expect_ok in ((False, False), (True, True)):
+            box = {}
+
+            def turn():
+                box["res"] = _http(url, "/api/ask",
+                                   payload={"text": "note_add text='from a test'"})
+
+            worker = threading.Thread(target=turn)
+            worker.start()
+            deadline = time.time() + 10
+            pending = []
+            while time.time() < deadline and not pending:
+                pending = hub.pending()
+                time.sleep(0.05)
+            assert pending, "a gated skill did not raise a confirmation"
+            assert worker.is_alive(), "the turn must block while waiting for an answer"
+            assert hub.resolve(pending[0]["confirm_id"], approved)
+            worker.join(timeout=20)
+            status, body, _ = box["res"]
+            assert status == 200, body
+            assert body["ok"] is expect_ok, (approved, body)
+    finally:
+        httpd.shutdown(); httpd.server_close(); rt.shutdown(drain=False)
+
+
+def test_web_confirmation_fails_closed_on_silence():
+    """Nobody answering is a refusal, not consent. Without this, closing the tab
+    mid-prompt would leave a pending action that eventually ran."""
+    from black_number.ui.web import Hub
+    hub = Hub(confirm_timeout=0.3)
+    started = time.time()
+    assert hub.ask("do something irreversible") is False
+    assert time.time() - started >= 0.3, "it must actually wait before refusing"
+    done = [e for e in hub.since(0)["events"] if e["kind"] == "confirm_done"]
+    assert done and done[-1]["timed_out"] is True and done[-1]["approved"] is False
+    assert hub.pending() == [], "a timed-out prompt must not stay pending"
+
+
+def test_web_confirmation_resolves_once_and_reports_stale_ids():
+    from black_number.ui.web import Hub
+    hub = Hub(confirm_timeout=5.0)
+    out = {}
+    worker = threading.Thread(target=lambda: out.update(ok=hub.ask("quit Safari")))
+    worker.start()
+    deadline = time.time() + 5
+    while time.time() < deadline and not hub.pending():
+        time.sleep(0.02)
+    cid = hub.pending()[0]["confirm_id"]
+    assert hub.resolve(cid, True) is True
+    worker.join(timeout=5)
+    assert out["ok"] is True
+    assert hub.resolve(cid, True) is False, "an answered prompt must not be answerable twice"
+    assert hub.resolve(999999, True) is False
+
+
+def test_web_event_stream_is_a_catch_up_cursor():
+    from black_number.ui.web import Hub
+    hub = Hub()
+    first = hub.publish("bn", text="one")
+    hub.publish("bn", text="two")
+    page = hub.since(0)
+    assert [e["text"] for e in page["events"]] == ["one", "two"]
+    assert page["cursor"] >= first + 1 and page["gap"] is False
+    assert hub.since(page["cursor"])["events"] == [], "a caught-up client gets nothing"
+
+
+def test_hublog_mirrors_the_real_logger_signature():
+    """HubLog wraps Log, so it must accept the same calls. Log.event's first
+    parameter is positional-only because a field named "kind" once collided with
+    it and killed a background thread; a wrapper that dropped that would
+    reintroduce the crash."""
+    from black_number.ui.web import Hub, HubLog
+    import inspect
+    from black_number.core.log import Log
+
+    real = inspect.signature(Log.event).parameters["kind"].kind
+    wrapped = inspect.signature(HubLog.event).parameters["kind"].kind
+    assert real == wrapped == inspect.Parameter.POSITIONAL_ONLY
+
+    hub = Hub()
+    log = HubLog(FakeLog(), hub)
+    log.event("schedule_add", id="t1", job_kind="timer")   # must not raise
+    log.event("anything", kind="a field literally named kind")
+    log.bn("spoken line")
+    assert any(e.get("kind") == "bn" for e in hub.since(0)["events"])
+
+
+def test_console_page_is_self_contained():
+    """The page must not fetch anything from the internet: it is served by the
+    assistant, offline, and a CDN would be both a dependency and a leak."""
+    from black_number.ui.web import PAGE
+    html = PAGE.read_text(encoding="utf-8")
+    assert "__BN_TOKEN__" in html, "the page needs the server-injected token slot"
+    external = re.findall(r"""(?:src|href)=["']https?://[^"']+""", html)
+    assert not external, f"page reaches outside: {external}"
+
+
+def test_both_front_ends_share_one_composition_root():
+    """The terminal and the web console must not be able to drift apart on the
+    safety wiring, so they build the assistant through the same function."""
+    from black_number.ui import cli, runtime, web
+    import inspect
+    assert cli.build_registry is runtime.build_registry
+    assert "runtime.build(" in inspect.getsource(cli.run)
+    assert "runtime.build(" in inspect.getsource(web.serve)
+    # And the gate's ask must be supplied, never defaulted.
+    assert "ask" in inspect.signature(runtime.build).parameters
+    assert inspect.signature(runtime.build).parameters["ask"].default is inspect.Parameter.empty
 
 
 for name, fn in list(globals().items()):

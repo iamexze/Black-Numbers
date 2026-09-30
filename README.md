@@ -11,10 +11,11 @@ Add a key and a microphone and the same assistant becomes conversational and
 hands-free. Nothing is rewritten; capabilities light up.
 
 ```bash
-git clone <this> && cd black-number
-python3 -m black_number                      # starts talking immediately
+git clone https://github.com/iamexze/Black-Numbers.git && cd Black-Numbers
+python3 -m black_number                       # starts talking immediately
 python3 -m black_number "what's the weather"  # one-shot mode
-python3 tests/test_core.py                   # 44 checks, including the safety invariants
+python3 -m black_number serve                 # web console on http://127.0.0.1:3002
+python3 tests/test_core.py                    # 57 checks, including the safety invariants
 ```
 
 No dependencies. macOS, Python 3.11+.
@@ -68,6 +69,44 @@ had asked for it directly. The test suite pins this down, and I verified it by
 mutation-testing: rewire `protocol_run` to call skills directly and the suite
 fails.
 
+## The local web console
+
+```bash
+python3 -m black_number serve            # http://127.0.0.1:3002
+python3 -m black_number serve --port 3010 --no-browser
+```
+
+The same assistant in a browser: a transcript, the full skill list by risk level,
+your protocols as one-click buttons, live pending timers, and the configuration
+it is actually running on. Confirmations appear as a modal — nothing that changes
+state runs until you click.
+
+It is a second **front end**, not a second assistant. Both the terminal and the
+console build the assistant through one function in `ui/runtime.py`, so they
+cannot drift apart on the gate, the registry or the risk policy. A test asserts
+that they both go through it.
+
+Four security properties, each mutation-verified:
+
+- **Loopback only.** It binds `127.0.0.1`, never `0.0.0.0`, and that is not a
+  setting. An API that can control your Mac does not belong on the LAN.
+- **Every `/api` call needs a token** in the `X-BN-Token` header, injected into
+  the page server-side so it never appears in a URL. A page on another origin
+  cannot set a custom header without a CORS preflight, and this server answers no
+  preflight and sends no CORS headers — so the browser refuses before the request
+  is made. Without this, any site open in your browser could POST to
+  `localhost:3002` and run skills.
+- **A foreign `Origin` is rejected outright**, as a second line of defence.
+- **Confirmation fails closed.** The gate is synchronous: it publishes the prompt
+  and blocks. If no answer arrives in 120 seconds — tab closed, browser crashed,
+  nobody looking — it returns *no*. Silence is never consent.
+
+One assistant, one lock: requests that drive the agent are serialised (a second
+one gets `429` rather than interleaving), while confirmations and event polling
+deliberately do not take that lock — they have to answer while a turn is blocked
+waiting on them, and that ordering is what stops it deadlocking on its own safety
+prompt.
+
 ## The upgrade switches
 
 Everything sits behind an interface, so each is a one-line `.env` change. Copy
@@ -101,7 +140,7 @@ black_number/
 ├── skills/      the unit of capability — one contract, 14 families
 ├── safety/      policy (what needs confirming) + gate (the one checkpoint)
 ├── agent/       the perceive→think→act loop, and two-tier memory
-└── ui/          the CLI runtime that assembles it all
+└── ui/          runtime (the one composition root) · cli · web + console.html
 ```
 
 **One idea runs through all of it:** a capability is a `Skill` with a declared
@@ -168,12 +207,14 @@ confirmation prompt can cover, and nothing here needs it yet.
 ## Testing
 
 ```bash
-python3 tests/test_core.py      # 44 checks, no pytest required
+python3 tests/test_core.py      # 57 checks, no pytest required
 ```
 
-The load-bearing tests are the safety ones, and they are mutation-verified —
-removing the gate, letting protocols bypass it, weakening the offline brain's
-guards, or breaking the failure grouper each turns the suite red. Several of the
+The load-bearing tests are the safety ones, and they are mutation-verified.
+Each of these breaks the suite: removing the gate, letting protocols bypass it,
+weakening the offline brain's guards, breaking the failure grouper, binding the
+console to `0.0.0.0`, dropping its token or origin check, leaking a CORS header,
+or making confirmation fail open. Several of the
 tests exist because they caught a real bug during development:
 
 - `schedule_add` logged a field named `kind`, which collided with the logger's own
@@ -188,13 +229,17 @@ tests exist because they caught a real bug during development:
 - The failure grouper read the apostrophe in `Couldn't` as an opening quote, so no
   two failures ever grouped — which silently defeated the whole diagnosis, since
   almost every failure message contains a contraction.
+- The console built its allowed-origin list from the *requested* port, which is
+  `0` when asking for any free port — so on an ephemeral port it rejected its own
+  browser. The bound port is only knowable after binding.
 
 ## Roadmap
 
 1. **Now** — 81 skills, protocols, scheduler, safety gate, self-diagnosis,
-   offline + Anthropic brains, memory with lessons, voice out, 44 tests. ✅
+   offline + Anthropic brains, memory with lessons, voice out, a local web
+   console, 57 tests. ✅
 2. Wake-word listening and barge-in with on-device speech (`BN_STT=macos`).
-3. A menu-bar runtime reusing the same composition root.
+3. A menu-bar runtime — a third front end on the same composition root.
 4. A self-critique loop that proposes protocol changes from its own transcript.
 
 ## Requirements

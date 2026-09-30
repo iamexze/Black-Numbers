@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Black Number</title>
+<style>
+  :root{
+    --bg:#0a0a0c; --panel:#121216; --panel-2:#17171d; --line:#26262e;
+    --ink:#e8e6e1; --dim:#8d8a84; --faint:#5c5a56;
+    --brass:#d7af6a; --brass-dim:#8a7040; --steel:#7aa7c7;
+    --ok:#6fbf73; --warn:#e0a33e; --bad:#d76a6a;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  }
+  button{font:inherit;color:inherit;cursor:pointer}
+
+  /* ── shell ─────────────────────────────────────────────────────────── */
+  .shell{display:grid;grid-template-columns:1fr 320px;grid-template-rows:auto 1fr auto;
+         height:100vh;max-height:100vh}
+  header{grid-column:1/-1;display:flex;align-items:center;gap:14px;
+         padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .emblem{width:26px;height:26px;flex:0 0 auto}
+  .wordmark{font-family:var(--mono);font-weight:700;letter-spacing:.16em;
+            font-size:13px;color:var(--brass);white-space:nowrap}
+  .tagline{color:var(--faint);font-size:12px;font-family:var(--mono)}
+  .header-stats{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .chip{font-family:var(--mono);font-size:11px;padding:3px 8px;border-radius:999px;
+        border:1px solid var(--line);background:var(--panel-2);color:var(--dim);white-space:nowrap}
+  .chip b{color:var(--ink);font-weight:600}
+
+  /* ── transcript ────────────────────────────────────────────────────── */
+  main{overflow-y:auto;padding:18px 16px 8px;scroll-behavior:smooth}
+  .turn{margin:0 0 14px;max-width:62rem}
+  .who{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
+       text-transform:uppercase;color:var(--faint);margin-bottom:3px}
+  .turn.you .who{color:var(--steel)}
+  .turn.bn .who{color:var(--brass)}
+  .said{white-space:pre-wrap;overflow-wrap:anywhere}
+  .turn.bn .said{color:var(--ink)}
+  .turn.you .said{color:#cfd8de}
+  .detail{margin-top:7px;font-family:var(--mono);font-size:12.5px;line-height:1.5;
+          color:var(--dim);background:var(--panel);border:1px solid var(--line);
+          border-left:2px solid var(--brass-dim);border-radius:6px;padding:9px 11px;
+          white-space:pre-wrap;overflow-x:auto;max-height:22rem;overflow-y:auto}
+  .note{font-family:var(--mono);font-size:12px;color:var(--faint);margin:0 0 9px}
+  .note.warn{color:var(--warn)} .note.bad{color:var(--bad)} .note.ok{color:var(--ok)}
+  .fired{border:1px solid var(--brass-dim);background:rgba(215,175,106,.07);
+         border-radius:8px;padding:10px 12px;margin:0 0 14px;color:var(--brass);
+         font-family:var(--mono);font-size:13px}
+  .empty{color:var(--faint);font-family:var(--mono);font-size:13px;line-height:1.9}
+  .empty b{color:var(--dim);font-weight:400}
+  .empty code{color:var(--steel);cursor:pointer;border-bottom:1px dotted var(--brass-dim)}
+
+  /* ── composer ──────────────────────────────────────────────────────── */
+  footer{grid-column:1/-1;border-top:1px solid var(--line);background:var(--panel);
+         padding:11px 16px}
+  .composer{display:flex;gap:9px;align-items:flex-end;max-width:62rem}
+  textarea{
+    flex:1;resize:none;min-height:42px;max-height:9rem;padding:10px 12px;
+    background:var(--panel-2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;font:inherit;outline:none
+  }
+  textarea:focus{border-color:var(--brass-dim)}
+  textarea::placeholder{color:var(--faint)}
+  .send{padding:10px 18px;border-radius:8px;border:1px solid var(--brass-dim);
+        background:var(--brass);color:#1a1408;font-weight:650}
+  .send:disabled{opacity:.45;cursor:default}
+  .hint{margin:7px 0 0;font-family:var(--mono);font-size:11px;color:var(--faint)}
+
+  /* ── side panel ────────────────────────────────────────────────────── */
+  aside{border-left:1px solid var(--line);background:var(--panel);overflow-y:auto;padding:14px}
+  .sect{margin-bottom:20px}
+  .sect h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.15em;
+           text-transform:uppercase;color:var(--faint);margin:0 0 8px;font-weight:600}
+  .kv{display:flex;justify-content:space-between;gap:10px;font-family:var(--mono);
+      font-size:11.5px;padding:2.5px 0;border-bottom:1px solid rgba(38,38,46,.5)}
+  .kv span:first-child{color:var(--faint)}
+  .kv span:last-child{color:var(--dim);text-align:right;overflow-wrap:anywhere}
+  .boot{display:flex;gap:7px;align-items:baseline;font-family:var(--mono);
+        font-size:11.5px;padding:2px 0}
+  .boot .g{flex:0 0 auto}
+  .boot .lbl{color:var(--dim);min-width:5.6rem}
+  .boot .note{color:var(--faint);margin:0;font-size:11px}
+  .g.up{color:var(--ok)} .g.part{color:var(--warn)} .g.down{color:var(--bad)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;padding:3px 8px;
+        margin:0 4px 5px 0;border-radius:6px;border:1px solid var(--line);
+        background:var(--panel-2);color:var(--dim)}
+  .pill:hover{border-color:var(--brass-dim);color:var(--ink)}
+  .pill.run{border-color:var(--brass-dim);color:var(--brass)}
+  .risk{margin-bottom:9px}
+  .risk .label{font-family:var(--mono);font-size:10.5px;color:var(--faint);
+               display:flex;justify-content:space-between;margin-bottom:4px}
+  .risk .label em{font-style:normal;color:var(--brass-dim)}
+  details summary{font-family:var(--mono);font-size:11px;color:var(--steel);
+                  cursor:pointer;margin-bottom:6px;outline:none}
+  .timer{font-family:var(--mono);font-size:11.5px;display:flex;justify-content:space-between;
+         gap:8px;padding:3px 0;color:var(--dim)}
+  .timer em{font-style:normal;color:var(--brass)}
+
+  /* ── confirmation ──────────────────────────────────────────────────── */
+  .scrim{position:fixed;inset:0;background:rgba(5,5,7,.82);display:none;
+         align-items:center;justify-content:center;padding:20px;z-index:50;
+         backdrop-filter:blur(3px)}
+  .scrim.on{display:flex}
+  .ask{width:min(560px,100%);background:var(--panel);border:1px solid var(--brass-dim);
+       border-radius:12px;padding:20px;box-shadow:0 22px 60px rgba(0,0,0,.6)}
+  .ask h3{margin:0 0 4px;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+          text-transform:uppercase;color:var(--brass)}
+  .ask .sub{margin:0 0 13px;font-size:12.5px;color:var(--faint)}
+  .ask .what{font-family:var(--mono);font-size:14px;color:var(--ink);background:var(--panel-2);
+             border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:14px;
+             overflow-wrap:anywhere;white-space:pre-wrap}
+  .ask .row{display:flex;gap:9px}
+  .ask button{flex:1;padding:11px;border-radius:8px;font-weight:650}
+  .deny{background:var(--panel-2);border:1px solid var(--line)}
+  .deny:hover{border-color:var(--bad);color:var(--bad)}
+  .approve{background:var(--brass);border:1px solid var(--brass-dim);color:#1a1408}
+  .countdown{margin:11px 0 0;font-family:var(--mono);font-size:11px;color:var(--faint);
+             text-align:center}
+  .countdown b{color:var(--warn)}
+
+  .offline{position:fixed;left:50%;transform:translateX(-50%);bottom:76px;z-index:40;
+           display:none;font-family:var(--mono);font-size:12px;color:#1a1408;
+           background:var(--warn);padding:6px 13px;border-radius:999px}
+  .offline.on{display:block}
+
+  @media (max-width:860px){
+    .shell{grid-template-columns:1fr;grid-template-rows:auto 1fr auto}
+    aside{display:none}
+    aside.open{display:block;grid-column:1;grid-row:2}
+    main.hide{display:none}
+    .panel-toggle{display:inline-block}
+  }
+  .panel-toggle{display:none;background:var(--panel-2);border:1px solid var(--line);
+                border-radius:6px;padding:4px 9px;font-family:var(--mono);font-size:11px;
+                color:var(--dim)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <svg class="emblem" viewBox="0 0 32 32" aria-hidden="true">
+      <circle cx="16" cy="16" r="14" fill="none" stroke="#8a7040" stroke-width="1.4"/>
+      <circle cx="16" cy="16" r="9.5" fill="none" stroke="#d7af6a" stroke-width="2"/>
+      <circle cx="16" cy="16" r="3.6" fill="#d7af6a"/>
+    </svg>
+    <div>
+      <div class="wordmark">BLACK NUMBER</div>
+      <div class="tagline">local console</div>
+    </div>
+    <div class="header-stats" id="stats"></div>
+    <button class="panel-toggle" id="toggle">status</button>
+  </header>
+
+  <main id="log">
+    <div class="empty" id="empty">
+      <b>Ask in plain words. With no API key these direct phrasings work:</b><br>
+      <code>what's the weather</code> · <code>how's the machine</code> ·
+      <code>am i online</code> · <code>what's 15% of 2400</code><br>
+      <code>set a timer for 2 minutes</code> · <code>run the sitrep protocol</code> ·
+      <code>note down buy coffee</code> · <code>diagnose yourself</code><br>
+      <b>Or call any skill directly:</b> <code>ping_host host=1.1.1.1</code>
+    </div>
+  </main>
+
+  <aside id="aside">
+    <div class="sect"><h2>subsystems</h2><div id="boot"></div></div>
+    <div class="sect"><h2>pending</h2><div id="timers"></div></div>
+    <div class="sect"><h2>protocols</h2><div id="protocols"></div></div>
+    <div class="sect"><h2>skills</h2><div id="skills"></div></div>
+    <div class="sect"><h2>configuration</h2><div id="config"></div></div>
+  </aside>
+
+  <footer>
+    <div class="composer">
+      <textarea id="input" rows="1" placeholder="What do you need?"
+                autocomplete="off" autofocus></textarea>
+      <button class="send" id="send">Send</button>
+    </div>
+    <p class="hint" id="hint">Enter to send · shift-Enter for a new line · anything that changes state asks first</p>
+  </footer>
+</div>
+
+<div class="offline" id="offline">lost contact with the assistant — retrying</div>
+
+<div class="scrim" id="scrim">
+  <div class="ask" role="alertdialog" aria-modal="true" aria-labelledby="askTitle">
+    <h3 id="askTitle">Confirm</h3>
+    <p class="sub">This changes something on your Mac. Nothing runs until you say so.</p>
+    <div class="what" id="askWhat"></div>
+    <div class="row">
+      <button class="deny" id="deny">Don't</button>
+      <button class="approve" id="approve">Do it</button>
+    </div>
+    <p class="countdown" id="countdown"></p>
+  </div>
+</div>
+
+<script>
+'use strict';
+const TOKEN = "__BN_TOKEN__";
+const HDRS = { 'Content-Type': 'application/json', 'X-BN-Token': TOKEN };
+const POLL_MS = 1000;
+const CONFIRM_WINDOW = 120;
+
+const $ = id => document.getElementById(id);
+const log = $('log'), input = $('input'), send = $('send');
+let cursor = 0, busy = false, current = null, deadline = 0, lost = 0;
+
+/* ── rendering ─────────────────────────────────────────────────────────── */
+function atBottom(){ return log.scrollHeight - log.scrollTop - log.clientHeight < 90; }
+function scroll(was){ if (was) log.scrollTop = log.scrollHeight; }
+
+function turn(who, text, detail){
+  const was = atBottom();
+  $('empty')?.remove();
+  const el = document.createElement('div');
+  el.className = 'turn ' + who;
+  const label = document.createElement('div');
+  label.className = 'who';
+  label.textContent = who === 'you' ? 'you' : 'black number';
+  const said = document.createElement('div');
+  said.className = 'said';
+  said.textContent = text;
+  el.append(label, said);
+  if (detail && detail.trim() && detail !== text){
+    const d = document.createElement('div');
+    d.className = 'detail';
+    d.textContent = detail;
+    el.append(d);
+  }
+  log.append(el);
+  scroll(was);
+}
+
+function note(text, kind){
+  const was = atBottom();
+  const el = document.createElement('p');
+  el.className = 'note' + (kind ? ' ' + kind : '');
+  el.textContent = text;
+  log.append(el);
+  scroll(was);
+}
+
+function fired(text){
+  const was = atBottom();
+  $('empty')?.remove();
+  const el = document.createElement('div');
+  el.className = 'fired';
+  el.textContent = '◆  ' + text;
+  log.append(el);
+  scroll(was);
+}
+
+/* ── sending ───────────────────────────────────────────────────────────── */
+async function ask(text){
+  if (!text.trim() || busy) return;
+  busy = true; send.disabled = true;
+  turn('you', text);
+  input.value = ''; sizeInput();
+  try {
+    const r = await fetch('/api/ask', {
+      method:'POST', headers:HDRS, body: JSON.stringify({ text })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) note(data.error || ('request failed: ' + r.status), 'bad');
+    // The reply itself arrives through the event stream, which also carries
+    // anything the assistant said mid-turn — so it is not printed twice here.
+  } catch (e) {
+    note('could not reach the assistant: ' + e.message, 'bad');
+  } finally {
+    busy = false; send.disabled = false; input.focus(); refresh();
+  }
+}
+
+/* ── events ────────────────────────────────────────────────────────────── */
+async function poll(){
+  try {
+    const r = await fetch('/api/events?since=' + cursor, { headers: HDRS });
+    if (!r.ok) throw new Error('status ' + r.status);
+    const data = await r.json();
+    lost = 0; $('offline').classList.remove('on');
+    if (data.gap) note('(some earlier output scrolled out of the buffer)');
+    cursor = data.cursor;
+    for (const e of data.events) handle(e);
+    syncConfirm(data.pending || []);
+  } catch (e) {
+    if (++lost >= 3) $('offline').classList.add('on');
+  } finally {
+    setTimeout(poll, POLL_MS);
+  }
+}
+
+function handle(e){
+  switch (e.kind){
+    case 'you':                                   break; // already shown locally
+    case 'bn':      turn('bn', e.text);            break;
+    case 'speech':                                 break; // same text as 'bn'
+    case 'system':  note('· ' + e.text);           break;
+    case 'warn':    note('! ' + e.text, 'warn');   break;
+    case 'ok':      note('✓ ' + e.text, 'ok');     break;
+    case 'fired':                                  break; // 'bn' carries the words
+    case 'confirm_done':
+      if (!e.approved) note(e.timed_out
+        ? 'nobody answered, so it was refused' : 'refused', 'warn');
+      break;
+  }
+}
+
+/* ── confirmation ──────────────────────────────────────────────────────── */
+function syncConfirm(pending){
+  if (!pending.length){ hideConfirm(); return; }
+  const next = pending[0];
+  if (current && current.confirm_id === next.confirm_id) return;
+  current = next;
+  deadline = Date.now() + CONFIRM_WINDOW * 1000;
+  $('askWhat').textContent = next.prompt;
+  $('scrim').classList.add('on');
+  $('deny').focus();
+  tick();
+}
+
+function hideConfirm(){
+  current = null;
+  $('scrim').classList.remove('on');
+  $('countdown').textContent = '';
+}
+
+function tick(){
+  if (!current) return;
+  const left = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+  $('countdown').innerHTML = left
+    ? 'refused automatically in <b>' + left + 's</b> if you do nothing'
+    : 'refusing…';
+  setTimeout(tick, 1000);
+}
+
+async function answer(approved){
+  if (!current) return;
+  const id = current.confirm_id;
+  hideConfirm();
+  try {
+    await fetch('/api/confirm', {
+      method:'POST', headers:HDRS,
+      body: JSON.stringify({ confirm_id: id, approved })
+    });
+  } catch (e) {
+    note('could not send that answer — it will be refused: ' + e.message, 'warn');
+  }
+}
+
+/* ── side panel ────────────────────────────────────────────────────────── */
+const GLYPH = { true:['◆','up'], false:['◇','down'], null:['◈','part'] };
+
+async function refresh(){
+  try {
+    const r = await fetch('/api/state', { headers: HDRS });
+    if (!r.ok) return;
+    paint(await r.json());
+  } catch (e) { /* the poller reports connectivity */ }
+}
+
+function paint(s){
+  $('stats').innerHTML =
+    chip('brain', s.brain) + chip('skills', s.skill_count) +
+    chip('gated', s.gated_count) + chip('lessons', s.memory.lessons);
+
+  $('boot').innerHTML = s.boot.map(b => {
+    const [g, cls] = GLYPH[String(b.state)] || GLYPH['null'];
+    return `<div class="boot"><span class="g ${cls}">${g}</span>`
+         + `<span class="lbl">${esc(b.label)}</span>`
+         + `<span class="note">${esc(b.note)}</span></div>`;
+  }).join('');
+
+  $('timers').innerHTML = s.timers.length
+    ? s.timers.map(t => `<div class="timer"><span>${esc(t.label)}</span>`
+        + `<em>${esc(t.due_in)}</em></div>`).join('')
+    : '<div class="timer"><span>nothing pending</span></div>';
+
+  $('protocols').innerHTML = s.protocols.map(p =>
+    `<button class="pill run" data-say="run the ${esc(p.name)} protocol" `
+    + `title="${esc(p.description)} — ${esc(p.steps.join(' → '))}">`
+    + `${esc(p.name)}</button>`).join('');
+
+  const order = ['READ_ONLY','REVERSIBLE','MUTATING','DESTRUCTIVE'];
+  $('skills').innerHTML = order.filter(k => s.skills[k]).map(k => {
+    const names = s.skills[k];
+    return `<details class="risk"><summary>${k.toLowerCase().replace('_',' ')}`
+      + ` — ${names.length}</summary>`
+      + names.map(n => `<button class="pill" data-fill="${esc(n)} ">${esc(n)}</button>`).join('')
+      + `</details>`;
+  }).join('');
+
+  $('config').innerHTML = s.config.map(c =>
+    `<div class="kv"><span>${esc(c.key)}</span><span>${esc(c.value)}</span></div>`).join('');
+}
+
+function chip(k, v){ return `<span class="chip">${esc(k)} <b>${esc(v)}</b></span>`; }
+function esc(v){
+  return String(v).replace(/[&<>"']/g, c =>
+    ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+/* ── wiring ────────────────────────────────────────────────────────────── */
+function sizeInput(){
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, 144) + 'px';
+}
+
+input.addEventListener('input', sizeInput);
+input.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); ask(input.value); }
+});
+send.addEventListener('click', () => ask(input.value));
+$('approve').addEventListener('click', () => answer(true));
+$('deny').addEventListener('click', () => answer(false));
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && current) answer(false);      // escape refuses
+});
+document.addEventListener('click', e => {
+  const say = e.target.closest('[data-say]');
+  if (say){ ask(say.dataset.say); return; }
+  const fill = e.target.closest('[data-fill]');
+  if (fill){ input.value = fill.dataset.fill; sizeInput(); input.focus(); return; }
+  const code = e.target.closest('.empty code');
+  if (code) ask(code.textContent);
+});
+$('toggle').addEventListener('click', () => {
+  $('aside').classList.toggle('open');
+  log.classList.toggle('hide');
+});
+
+refresh();
+poll();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>
