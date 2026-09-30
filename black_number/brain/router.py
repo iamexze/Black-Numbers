@@ -19,7 +19,8 @@ def build_brain(cfg, log) -> Brain:
     chain: list[Brain] = []
 
     if want == "anthropic":
-        chain.append(AnthropicBrain(cfg.anthropic_key, cfg.anthropic_model))
+        chain.append(AnthropicBrain(cfg.anthropic_key, cfg.anthropic_model,
+                                   effort=getattr(cfg, "effort", "high")))
     elif want == "ollama":
         chain.append(OllamaBrain(cfg.ollama_host, cfg.ollama_model))
     # offline is always the floor

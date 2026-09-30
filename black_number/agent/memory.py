@@ -72,9 +72,34 @@ class Memory:
             self.facts_path.unlink()
         return n
 
+    def of_kind(self, kind: str) -> list[dict[str, Any]]:
+        return [f for f in self.facts if f.get("kind") == kind]
+
     def recall_block(self) -> str:
-        """The facts, formatted for the system prompt. Empty string if none."""
+        """Long-term memory, formatted for the system prompt. '' if there is none.
+
+        Lessons are separated from facts and stated as standing instructions,
+        because they are different in kind. A fact ("the user lives in Kochi") is
+        context to draw on; a lesson ("don't read long output aloud") is a
+        directive about behaviour. Mixing them into one list buries the
+        directives, and a correction that gets ignored is not a correction — so
+        the lessons come last, where an instruction carries most weight, and are
+        labelled as binding.
+        """
         if not self.facts:
             return ""
-        lines = [f"- {f['text']}" for f in self.facts[-40:]]
-        return "What you know about the user and prior sessions:\n" + "\n".join(lines)
+        lessons = self.of_kind("lesson")
+        others = [f for f in self.facts if f.get("kind") != "lesson"]
+        blocks: list[str] = []
+        if others:
+            blocks.append(
+                "What you know about the user and prior sessions:\n"
+                + "\n".join(f"- {f['text']}" for f in others[-40:])
+            )
+        if lessons:
+            blocks.append(
+                "Corrections you have been given. These are standing instructions and "
+                "they override your defaults:\n"
+                + "\n".join(f"- {f['text']}" for f in lessons[-20:])
+            )
+        return "\n\n".join(blocks)

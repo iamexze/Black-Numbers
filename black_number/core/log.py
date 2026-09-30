@@ -30,9 +30,20 @@ class Log:
         self.path = path
         self._fh = path.open("a", encoding="utf-8")
 
-    def event(self, kind: str, **fields: Any) -> None:
-        """Append one structured event to the JSONL transcript."""
-        row = {"ts": round(time.time(), 3), "kind": kind, **fields}
+    def event(self, kind: str, /, **fields: Any) -> None:
+        """Append one structured event to the JSONL transcript.
+
+        `kind` is positional-only. It was an ordinary parameter once, which meant
+        a caller logging a field of its own called "kind" — a scheduled job's
+        kind, say — raised TypeError at the call site, before any of this
+        function's error handling could absorb it. That took down a background
+        thread. Making it positional-only means such a field lands in `fields`
+        harmlessly, and the loop below keeps it from overwriting the event kind.
+        Logging must never be able to break its caller.
+        """
+        row = {"ts": round(time.time(), 3), "kind": kind}
+        for key, value in fields.items():
+            row[key if key != "kind" else "kind_field"] = value
         try:
             self._fh.write(json.dumps(row, default=str, ensure_ascii=False) + "\n")
             self._fh.flush()

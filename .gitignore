@@ -8,14 +8,18 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# Secrets and local state
+# Secrets
 .env
 .env.local
-var/logs/*.log
-var/memory/*.jsonl
-var/memory/*.db
+
+# Runtime state. Everything under var/ is generated at startup and belongs to
+# this machine: transcripts, long-term memory, notes, the pending timer queue,
+# screenshots. None of it should ever be committed — an earlier revision tracked
+# a day's transcript, which is a log of the user's activity.
+var/
 *.wav
 *.aiff
 
 # OS
 .DS_Store
+graft/

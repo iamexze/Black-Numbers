@@ -1,62 +1,104 @@
 # Black Number
 
 A voice-activated, self-improving personal assistant for your Mac — a Jarvis you
-actually own. It listens, reasons, and controls the machine through a growing set
-of skills, with a hard safety boundary between what it does freely and what it
-asks you about first.
+actually own. It listens, reasons, and controls the machine through 81 skills,
+with a hard safety boundary between what it does freely and what it asks you
+about first.
 
 It is built to run **before you configure anything**: clone it, run it, and it
-works with typed input, an offline command brain, and a real set of skills. Add a
-key and a microphone and the same assistant becomes conversational and hands-free
-— nothing is rewritten, capabilities just light up.
+works — typed input, an offline command brain, voice out, and every skill live.
+Add a key and a microphone and the same assistant becomes conversational and
+hands-free. Nothing is rewritten; capabilities light up.
 
 ```bash
 git clone <this> && cd black-number
-python3 -m black_number                 # starts talking immediately, typed input
-python3 -m black_number "what's the time"   # one-shot mode
-python3 tests/test_core.py              # 13 checks, including the safety invariants
+python3 -m black_number                      # starts talking immediately
+python3 -m black_number "what's the weather"  # one-shot mode
+python3 tests/test_core.py                   # 44 checks, including the safety invariants
 ```
 
-## What works right now, with zero setup
+No dependencies. macOS, Python 3.11+.
 
-- **Voice out** through macOS `say` (no install).
-- **Offline brain**: direct commands map to skills with no API key — "volume up",
-  "open Safari", "run a security audit", "what's the time", "search X".
-- **Skills, live and real** — verified against this machine:
-  - System: volume, brightness, open/quit apps, battery, clock, screenshot, focus.
-  - Files & shell: list, read, find, and run commands **through the safety gate**.
-  - Web: keyless search and page fetch.
-  - Security: audit this Mac's own hardening; authorized-only port checks.
-  - Self: capabilities, durable memory, read back its own transcript, status.
+## What it can do
 
-## The four upgrade switches
+81 skills in 14 families. Everything below was run against this machine, not
+sketched.
 
-Everything is behind an interface, so each of these is a one-line `.env` change,
-not a rewrite. Copy `.env.example` to `.env`:
+| Family | What it covers |
+|---|---|
+| **system** | volume, brightness, open/quit apps, battery, clock, screenshot, frontmost app |
+| **time** | timers, reminders, focus sessions, stopwatch — on a real background scheduler |
+| **world** | weather, forecast, headlines, exact arithmetic, unit conversion, definitions |
+| **network** | connectivity, local and public IP, ping, DNS, port owners, Wi-Fi power, throughput |
+| **machine** | load, memory, disk, busiest processes |
+| **repos** | git status and log, code search, project scan, run a test suite, open in an editor |
+| **media** | play/pause/skip in Music or Spotify, now playing, dark mode, lock, sleep, keep awake, wallpaper |
+| **personal** | Reminders, Calendar, Notes — read and write, through AppleScript |
+| **clipboard & notes** | read/write the clipboard, a timestamped Markdown notebook, search across notebooks |
+| **files & shell** | list, read, find, and run commands **through the safety gate** |
+| **web** | keyless search and page fetch |
+| **security** | audit this Mac's own hardening; authorized-only port checks |
+| **protocols** | named routines it can be taught and run by name |
+| **self** | diagnose its own failures, measure its own usage, learn corrections, run its own tests |
+
+Ask in plain words. With no API key an offline table maps direct phrasings onto
+skills — `what's the weather`, `set a timer for ten minutes`, `remind me to call
+mom in 20 minutes`, `am I online`, `run the sitrep protocol`, `how's the machine`,
+`what's 15% of 2400`, `note down buy coffee`. With a key, it holds a conversation
+and chains tools.
+
+## Protocols — teaching it a routine
+
+A protocol is an ordered set of skills under one name. Five ship built in
+(`sitrep`, `morning`, `diagnostics`, `workspace`, `wind_down`), and you can teach
+more in one sentence:
+
+```
+run the sitrep protocol
+protocol_define name=coffee steps="clock; set_timer duration='4 min' label=french press"
+```
+
+They are data, not code — saved as JSON, readable before you run one, available
+immediately, no restart and no model required.
+
+**A protocol is not a way around the gate.** It executes nothing itself; every
+step goes back through the registry and is confirmed on its own merits. A
+protocol containing a destructive step prompts exactly as that step would if you
+had asked for it directly. The test suite pins this down, and I verified it by
+mutation-testing: rewire `protocol_run` to call skills directly and the suite
+fails.
+
+## The upgrade switches
+
+Everything sits behind an interface, so each is a one-line `.env` change. Copy
+`.env.example` to `.env`:
 
 | Switch | Default | Upgrade to |
 |---|---|---|
 | `BN_BRAIN` | `offline` (no key) | `anthropic` (add `ANTHROPIC_API_KEY`) or `ollama` (local) |
+| `BN_EFFORT` | `high` | `medium` / `low` for snappier routine commands |
 | `BN_STT` | `text` | `macos` (on-device mic) — `pip install -e '.[macspeech]'` |
 | `BN_TTS` | `macos_say` | `none` for silent |
+| `BN_ADDRESS` | *(none)* | `sir`, `boss`, your name — how it addresses you |
+| `BN_CITY` | *(geolocate)* | your city, so "what's the weather" needs no argument |
 | `BN_CONFIRM` | `trusted` | `always` (confirm everything) or `never` (allowlist only) |
 
-With a key the assistant holds real conversations and chains tools; without one it
-still runs every skill from direct phrasing. It never fails to start because
-something is missing — each layer degrades to the one below it.
+It never fails to start because something is missing. Each layer degrades to the
+one below, and the startup report says which layer you are actually on — a key
+with no SDK installed reports `offline`, with the reason, rather than claiming a
+brain that cannot run.
 
 ## Architecture
 
 ```
 black_number/
-├── core/        config (env → .env → defaults) and the JSONL transcript logger
+├── core/        config · JSONL transcript logger · scheduler · presentation
 ├── brain/       reasoning behind one interface:
 │                  anthropic · ollama · offline (deterministic) + a fallback router
 ├── speech/
 │   ├── stt/     text · macOS on-device speech (SFSpeechRecognizer)
 │   └── tts/     macOS `say` · silent
-├── skills/      the unit of capability — one contract, five families so far
-│                  system_mac · files_shell · web_research · security · meta
+├── skills/      the unit of capability — one contract, 14 families
 ├── safety/      policy (what needs confirming) + gate (the one checkpoint)
 ├── agent/       the perceive→think→act loop, and two-tier memory
 └── ui/          the CLI runtime that assembles it all
@@ -64,51 +106,96 @@ black_number/
 
 **One idea runs through all of it:** a capability is a `Skill` with a declared
 risk level, and the registry routes every call through a single safety `Gate`
-before anything that changes state runs. There is no code path that runs a
-mutating action unattended under the default policy — a property the test suite
-enforces and I verified by mutation-testing it.
+before anything that changes state runs. Adding a capability is registering a
+`Skill`; nothing in the core changes.
 
 ## Safety, concretely
 
 - Every skill declares a **risk**: read-only, reversible, mutating, destructive.
 - Under the default `trusted` policy, read-only runs freely; anything that changes
-  state is confirmed with the exact action shown ("run shell: `rm x`").
+  state is confirmed with the exact action shown (`run shell: rm x`).
 - The shell skill classifies each command against a **read-only allowlist** — an
   unknown command is treated as state-changing and confirmed, never the reverse.
-- File skills are rooted at your home directory.
+- File skills are rooted at your home directory; notebook names are sanitised so
+  a name like `../../etc/passwd` cannot leave the notes folder.
+- Text bound for AppleScript is escaped in one place, so a reminder called
+  `"; do something else` cannot change the meaning of the script carrying it.
+- Arithmetic is parsed into an AST and walked against a whitelist. `eval` is never
+  called; `__import__('os')`, attribute access and `2**99999999` are each refused
+  with a reason.
+
+The suite sweeps the **live registry**: every skill declaring reversible or worse
+must prompt before running. Declining means nothing executes, so the check is safe
+to run against the real skill set — and it cannot be forgotten when a skill is
+added.
 
 ### The security skill
 
 Scoped, in code, to **defensive and authorized use**:
 
 - The default action audits **this Mac's own posture** — firewall, FileVault,
-  screen lock, updates, exposed sharing services — and tells you what's weak. It
-  changes nothing. (On this machine it flagged pending updates and an exposed SSH
-  service — real findings.)
+  screen lock, updates, exposed sharing services — and changes nothing.
 - Any check against a **named target** requires you to affirm, in the moment, that
-  you are authorized to test it. This authorization prompt is **never**
-  auto-allowed, even under a permissive confirmation policy — enforced and tested.
+  you are authorized to test it. This prompt is **never** auto-allowed, even under
+  `BN_CONFIRM=never` — enforced and tested.
 - Public-internet targets are refused outright. Mass scanning, exploitation of
-  third-party systems, credential attacks and detection-evasion are out of scope
-  by design and the module will not grow to include them.
+  third-party systems, credential attacks and detection evasion are out of scope
+  by design, and the module will not grow to include them.
 
-## Self-improving, as a real mechanism not a slogan
+## Self-improving, as a mechanism
 
-Every turn — each utterance, tool call, confirmation and outcome — is appended to
-a JSONL transcript. The `review_self` skill already reads it back to summarise
-what ran and what failed. That transcript is the substrate the next steps build
-on: a maintenance loop that reads its own failures and proposes fixes, and a
-skill-authoring skill that scaffolds new skills into `skills/` following the same
-contract. The architecture is arranged so those are additions, not surgery.
+Every turn — each utterance, tool call, confirmation, scheduled firing and
+outcome — is appended to a JSONL transcript. That transcript is not for debugging;
+it is what the assistant reads about itself.
+
+- `self_diagnose` ranks its own recent failures, collapses similar ones into a
+  shape, and names what would fix each — including which file the fix belongs in.
+- `self_metrics` measures its own usage: requests, actions, success rate, what you
+  actually use it for.
+- `self_inventory` compares what it can do against what it has ever done. A
+  registered skill that never runs is usually unreachable rather than unwanted.
+- `self_lesson` records a correction that is injected into the system prompt on
+  every later turn, in this session and future ones. Lessons are kept apart from
+  facts and stated as binding, because a correction buried in a list of trivia is
+  a correction that gets ignored.
+- `self_test` runs its own suite and reports the result honestly.
+
+Self-extension is deliberately **declarative**: protocols let it acquire new
+behaviour as data. It does not write and load its own Python. That line is
+intentional — a code-generating skill is a much larger safety surface than a
+confirmation prompt can cover, and nothing here needs it yet.
+
+## Testing
+
+```bash
+python3 tests/test_core.py      # 44 checks, no pytest required
+```
+
+The load-bearing tests are the safety ones, and they are mutation-verified —
+removing the gate, letting protocols bypass it, weakening the offline brain's
+guards, or breaking the failure grouper each turns the suite red. Several of the
+tests exist because they caught a real bug during development:
+
+- `schedule_add` logged a field named `kind`, which collided with the logger's own
+  positional parameter and raised `TypeError` at the call site. Every timer would
+  have failed to set, and the first firing would have killed the clock thread.
+  Fixed at both ends: the call sites were renamed, and `Log.event`'s `kind` is now
+  positional-only so logging can never break its caller again.
+- `parse_duration("half an hour")` returned 3630 seconds instead of 1800, because
+  the article in "half **an** hour" was counted as a separate quantity.
+- Stripping thousands separators from `1,250` also ate the argument separators in
+  `max(3,9,2)`, turning it into `max(392)`.
+- The failure grouper read the apostrophe in `Couldn't` as an opening quote, so no
+  two failures ever grouped — which silently defeated the whole diagnosis, since
+  almost every failure message contains a contraction.
 
 ## Roadmap
 
-1. **Now** — working base: skills, safety gate, offline + Anthropic brains, memory,
-   voice out, tests. ✅
+1. **Now** — 81 skills, protocols, scheduler, safety gate, self-diagnosis,
+   offline + Anthropic brains, memory with lessons, voice out, 44 tests. ✅
 2. Wake-word listening and barge-in with on-device speech (`BN_STT=macos`).
-3. LLM-driven multi-step tasks with the full tool loop (needs a key).
-4. A skill that writes skills, gated and reviewed before load.
-5. A self-critique loop that reads the transcript and files its own improvements.
+3. A menu-bar runtime reusing the same composition root.
+4. A self-critique loop that proposes protocol changes from its own transcript.
 
 ## Requirements
 

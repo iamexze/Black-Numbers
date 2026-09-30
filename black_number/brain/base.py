@@ -27,6 +27,11 @@ class Turn:
     text: str = ""  # what to say, if anything
     tool_calls: list[ToolCall] = field(default_factory=list)
     done: bool = True  # False means the brain expects tool results and will continue
+    # The provider's own content blocks, when it has them. The agent loop replays
+    # these verbatim instead of rebuilding the turn from `text` and `tool_calls`,
+    # which is what keeps provider-specific blocks — reasoning blocks above all —
+    # intact across turns. Providers without such blocks leave it None.
+    raw_blocks: list[Any] | None = None
 
 
 class Brain:

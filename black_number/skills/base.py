@@ -91,3 +91,4 @@ class Context:
     memory: Any  # agent.memory.Memory
     speak: Callable[[str], None]  # so a long-running skill can narrate progress
     registry: Any = None  # skills.registry.Registry, for skills that compose others
+    scheduler: Any = None  # core.scheduler.Scheduler, for anything that waits
